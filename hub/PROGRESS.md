@@ -114,6 +114,27 @@
 - decay 用 math.exp(-0.01 * days) + access_count 加權,可調 DECAY_LAMBDA
 - dedup 抽樣前 2000 點做語意比對 (全兩兩 O(n²) 太慢),MVP 夠用
 
+### 🔧 收尾後修復 (v2.0.0 後發現的 3 個 bug)
+
+**Bug 1: decay 公式過度降權** ✅ FIXED
+- 症狀: decay --apply 把 10989 點的 importance 全降到 0.3-0.5 (190/200),原本應在 0.5-0.7
+- 根因: (1) 新記憶沒保護期 (2) 公式 (0.5+health*0.5) 下限 0.5 太低 (3) access_count 讀錯位置 (metadata.access_count 不存在)
+- 修法: 加 7 天保護期 + 溫和衰減 (0.8+health*0.2, 最多降 20%) + access_count 從 payload 頂層讀
+- 驗證: 修復後 dry-run 0 點需降 (全在新記憶保護期)
+- 資料修復: fix_decayed.py 把被誤降的 10338 點 importance 回復 (0.3-0.5 → 0.5-0.7)
+
+**Bug 2: migrate.py 重跑 timeout (>5min)** ✅ FIXED
+- 症狀: migrate.py 重跑會全量 re-embed 9968 點,timeout
+- 根因: 沒有「已 migrate 過就跳過」的短路邏輯
+- 修法: 對每個 source 檢查 unified_mem 是否已有該 source_agent 資料,有就跳過 (設 MIGRATE_FORCE=1 可強制重跑)
+- 驗證: 重跑從 >5min → 22s (主要是 embedder 載入)
+
+**Bug 3: hub_daemon log 沒寫完** ✅ FIXED
+- 症狀: daemon log 只到「🔄 跑採集...」就停,collect 的進度沒即時寫入
+- 根因: subprocess.run(capture_output=True) 要等進程結束才給 stdout
+- 修法: 改用 Popen + 逐行讀 stdout 即時寫 log
+- 驗證: daemon --once 現在能看到 collect 的「📋 Phase 1: 偵測可用 connector」逐行輸出
+
 ## 下一步
 階段 5: 匯出/轉化
 

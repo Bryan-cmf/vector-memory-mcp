@@ -167,7 +167,15 @@ def run_dedup(threshold: float = 0.92, apply: bool = False) -> dict:
 # decay
 # ─────────────────────────────────────────────────────────
 def run_decay(apply: bool = False) -> dict:
-    """時間衰減: 降 importance 給老舊未存取記憶。"""
+    """時間衰減: 溫和降 importance 給「老舊 + 未被存取」的記憶。
+
+    設計原則 (修正版):
+    1. 新記憶保護期: created_at 在 7 天內的不降 (剛採集不該被懲罰)
+    2. access_count 從 payload 正確讀 (不是 metadata.access_count)
+    3. 溫和衰減: new_imp = old * (0.8 + health * 0.2),下限 0.8 (只降最多 20%)
+       避免一次 decay 把 importance 砍半
+    4. health = decay_factor (時間) * 0.6 + access_factor (使用) * 0.4
+    """
     print(f"📉 decay (apply={apply})", flush=True)
     t0 = time.time()
     points = scroll_all(max_points=20000)
@@ -176,50 +184,61 @@ def run_decay(apply: bool = False) -> dict:
     now = datetime.now(timezone.utc)
     updates = []
     decayed = 0
+    skipped_new = 0
     for p in points:
         payload = p.get("payload", {})
         created = payload.get("created_at", "")
+        # 用 collected_at (採集時間) 或 created_at 算年齡
         last_acc = payload.get("collected_at", created)
+
         try:
             dt = datetime.fromisoformat(last_acc.replace("Z", "+00:00"))
             days = max(0, (now - dt).days)
         except (ValueError, TypeError):
             days = 0
 
+        # 新記憶保護期: 7 天內不降
+        if days < 7:
+            skipped_new += 1
+            continue
+
         decay_factor = math.exp(-DECAY_LAMBDA * days)
-        access_count = payload.get("metadata", {}).get("access_count", 0)
+        # access_count 在 payload 頂層或 metadata 裡 (兩種 schema 都支援)
+        access_count = payload.get("access_count",
+                                   payload.get("metadata", {}).get("access_count", 0))
         access_factor = math.log(1 + access_count) / math.log(101) if access_count > 0 else 0
-        health = decay_factor * 0.7 + access_factor * 0.3
+        health = decay_factor * 0.6 + access_factor * 0.4
 
         old_imp = payload.get("importance", 0.5)
-        new_imp = round(max(0.0, min(1.0, old_imp * (0.5 + health * 0.5))), 3)
+        # 溫和衰減: 只降最多 20% (0.8 + health*0.2 ∈ [0.8, 1.0])
+        multiplier = 0.8 + health * 0.2
+        new_imp = round(max(0.05, min(1.0, old_imp * multiplier)), 3)
 
-        if new_imp < old_imp - 0.05:
+        if new_imp < old_imp - 0.02:
             decayed += 1
             if apply:
                 updates.append({"id": p.get("id"),
                                 "payload": {"importance": new_imp, "last_decayed": now.isoformat()}})
 
     if apply and updates:
-        # set_payload 批次
-        for i in range(0, len(updates), 100):
-            batch = updates[i:i+100]
-            # Qdrant set payload 需逐點 (用 points selector)
-            for u in batch:
-                try:
-                    qdrant("POST", f"/collections/{UNIFIED}/points/payload", {
-                        "payload": {"importance": u["payload"]["importance"],
-                                    "last_decayed": u["payload"]["last_decayed"]},
-                        "points": [u["id"]],
-                    })
-                except Exception:
-                    pass
+        # 批次 set payload (Qdrant 接受 points list + 同一 payload)
+        # 但每點 importance 不同,需逐點;分批避免太多請求
+        for u in updates:
+            try:
+                qdrant("POST", f"/collections/{UNIFIED}/points/payload", {
+                    "payload": {"importance": u["payload"]["importance"],
+                                "last_decayed": u["payload"]["last_decayed"]},
+                    "points": [u["id"]],
+                })
+            except Exception:
+                pass
 
     elapsed = time.time() - t0
     print(f"   {'📉 已降權' if apply else '🔍 偵測需降權'}: {decayed}", flush=True)
+    print(f"   跳過新記憶 (<7天): {skipped_new}", flush=True)
     print(f"   耗時: {elapsed:.1f}s", flush=True)
-    return {"decayed_target": decayed, "applied": apply,
-            "applied_count": len(updates) if apply else 0}
+    return {"decayed_target": decayed, "skipped_new": skipped_new,
+            "applied": apply, "applied_count": len(updates) if apply else 0}
 
 
 # ─────────────────────────────────────────────────────────

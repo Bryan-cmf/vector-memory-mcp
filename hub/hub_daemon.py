@@ -51,17 +51,27 @@ def run_collect() -> dict:
     """跑一次採集,回傳統計。"""
     log("🔄 跑採集...")
     try:
-        r = subprocess.run(
-            [VENV_PYTHON, str(HUB_DIR / "collect.py")],
+        # 用 Popen + 即時讀 stdout/stderr,讓 log 即時寫入 (避免 capture_output 等到結束)
+        proc = subprocess.Popen(
+            [VENV_PYTHON, "-u", str(HUB_DIR / "collect.py")],
             cwd=str(HUB_DIR),
-            capture_output=True, text=True, timeout=1800,   # 30 min 上限
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            text=True,
         )
-        ok = r.returncode == 0
-        log(f"   {'✓' if ok else '✗'} collect {'OK' if ok else 'FAIL'} (rc={r.returncode})")
-        if not ok:
-            log(f"   stderr: {r.stderr[-500:]}")
-        return {"ok": ok, "stdout_tail": r.stdout[-300:], "stderr_tail": r.stderr[-300:]}
+        stdout_lines = []
+        try:
+            for line in proc.stdout:
+                line = line.rstrip()
+                if line:
+                    log(f"   {line}")
+                    stdout_lines.append(line)
+        except KeyboardInterrupt:
+            proc.terminate()
+        proc.wait(timeout=1800)   # 30 min 上限
+        ok = proc.returncode == 0
+        log(f"   {'✓' if ok else '✗'} collect {'OK' if ok else 'FAIL'} (rc={proc.returncode})")
+        return {"ok": ok, "stdout_tail": "\n".join(stdout_lines[-5:])}
     except subprocess.TimeoutExpired:
         log("   ✗ collect 超時 (30min)")
         return {"ok": False, "error": "timeout"}

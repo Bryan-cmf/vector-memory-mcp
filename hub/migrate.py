@@ -123,6 +123,30 @@ def migrate_source(name: str, embedder) -> tuple[int, int]:
         print(f"  ⏭️  {name}: 空集合,略過", flush=True)
         return 0, 0
 
+    # 短路: 若 unified_mem 已有此 source 的資料,且點數 >= source,視為已 migrate
+    # (避免重跑時無腦全量 re-embed 造成 timeout)
+    try:
+        unified_info = qdrant("GET", f"/collections/{UNIFIED}").get("result", {})
+        unified_count = unified_info.get("points_count", 0)
+        if unified_count > 0 and not os.environ.get("MIGRATE_FORCE"):
+            # 抽樣確認 source 是否已在 unified_mem (用 source_agent filter)
+            source_agent_hint = {
+                "openclaw_mem": "openclaw", "claude_mem": "claude",
+                "deepseek_mem": "deepseek", "hermes_mem": "hermes",
+            }.get(name)
+            if source_agent_hint:
+                from urllib.parse import quote
+                # scroll 一筆看 source_agent 是否存在
+                chk = qdrant("POST", f"/collections/{UNIFIED}/points/scroll", {
+                    "limit": 1, "with_payload": True, "with_vector": False,
+                    "filter": {"must": [{"key": "source_agent", "match": {"value": source_agent_hint}}]}
+                })
+                if chk.get("result", {}).get("points"):
+                    print(f"  ⏭️  {name}: 已 migrate 過 (unified_mem 有 {source_agent_hint} 資料),跳過。設 MIGRATE_FORCE=1 強制重跑", flush=True)
+                    return total, 0
+    except Exception:
+        pass    # 檢查失敗就照常跑 (安全 fallback)
+
     print(f"\n📋 {name} ({total} pts) → normalize + embed + upsert...", flush=True)
     offset = None
     done = 0
