@@ -8,8 +8,8 @@
 |---|---|---|
 | 1. 統一 Schema + Migration | ✅ PASS | 66e9c74 |
 | 2. 多源 Connector | ✅ PASS | 54ee26f |
-| 3. Daemon + CLI | ✅ PASS | (待 commit) |
-| 4. 生命週期自動化 | ⏳ 待做 | - |
+| 3. Daemon + CLI | ✅ PASS | 0e7f346 |
+| 4. 生命週期自動化 | ⚠️ PARTIAL | (待 commit) |
 | 5. 匯出/轉化 | ⏳ 待做 | - |
 | 6. 雲端備份 | ⏳ 待做 | - |
 | 7. 隱私 + Dashboard 升級 | ⏳ 待做 | - |
@@ -90,5 +90,29 @@
 ### FAIL 區
 (無)
 
+## 階段 4 詳細結果 ⚠️ PARTIAL
+
+### 完成項
+- `hub/lifecycle.py`: dedup (硬重複 content_hash + 語意重複向量搜尋) / decay (時間衰減降 importance) / contradict (關鍵詞反義偵測)
+- 全部走 Qdrant REST,不依賴 MCP server (mem_* 工具走 stdio 不易直接呼叫)
+
+### 驗收證據
+- py_compile 通過 ✅
+- **dedup dry-run**: 1971 去重目標 (730 硬重複 + 1371 語意重複) ✅
+- **dedup --apply**: 11270 → **9299 點** (實刪 1971,與偵測完全吻合) ✅
+- decay 邏輯實作完成 (未 apply,避免動 importance)
+- daemon 已整合 lifecycle hook (run_lifecycle_if_due)
+
+### FAIL 區
+- **contradict 嚴重誤報**: 217k 對「潛在矛盾」,因關鍵詞「對/錯」「是/不是」在中文太常用
+  - 根因: 純關鍵詞比對無法判斷語意對立
+  - 正確做法: 需 LLM 判斷 (把候選對丟給 embedding 模型算對立度,或呼叫 LLM API)
+  - 暫時處置: 功能保留但標記為「實驗性」,daemon 排程跳過 contradict
+
+### 決策記錄
+- lifecycle 不呼叫 mem_* MCP 工具 (走 stdio 太重),改用 Qdrant REST 自實作
+- decay 用 math.exp(-0.01 * days) + access_count 加權,可調 DECAY_LAMBDA
+- dedup 抽樣前 2000 點做語意比對 (全兩兩 O(n²) 太慢),MVP 夠用
+
 ## 下一步
-階段 4: 生命週期自動化
+階段 5: 匯出/轉化
