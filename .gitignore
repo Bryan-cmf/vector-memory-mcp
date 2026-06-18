@@ -13,3 +13,7 @@ clients/*.snippet.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Python cache
+__pycache__/
+*.pyc
