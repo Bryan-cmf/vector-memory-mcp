@@ -1,0 +1,26 @@
+# vector-memory-hub systemd user unit (Linux)
+#
+# 安裝:
+#   mkdir -p ~/.config/systemd/user
+#   cp vector-memory-hub.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now vector-memory-hub
+#
+# 看狀態: systemctl --user status vector-memory-hub
+# 看 log: journalctl --user -u vector-memory-hub -f
+
+[Unit]
+Description=vector-memory-hub daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=CHANGEME/.vector-memory-mcp/.venv/bin/python CHANGEME/.vector-memory-mcp/hub/hub_daemon.py --interval 15
+WorkingDirectory=CHANGEME/.vector-memory-mcp/hub
+Environment=QDRANT_URL=http://localhost:6333
+Environment=VECTOR_MEMORY_DIR=CHANGEME/.vector-memory-mcp
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

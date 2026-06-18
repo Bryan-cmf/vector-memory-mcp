@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  vector-memory-hub launchd plist 範本
+
+  安裝: vector-memory-hub start  (會自動產生正確路徑的版本並 load)
+  或手動:
+    1. 複製此檔到 ~/Library/LaunchAgents/com.vector-memory.hub.plist
+    2. 把 CHANGEME 標記換成你的實際路徑
+    3. launchctl load ~/Library/LaunchAgents/com.vector-memory.hub.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.vector-memory.hub</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>CHANGEME/.vector-memory-mcp/.venv/bin/python</string>
+    <string>CHANGEME/.vector-memory-mcp/hub/hub_daemon.py</string>
+    <string>--interval</string>
+    <string>15</string>
+  </array>
+  <key>WorkingDirectory</key><string>CHANGEME/.vector-memory-mcp/hub</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>QDRANT_URL</key><string>http://localhost:6333</string>
+    <key>VECTOR_MEMORY_DIR</key><string>CHANGEME/.vector-memory-mcp</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>CHANGEME/.vector-memory-mcp/hub-daemon.log</string>
+  <key>StandardErrorPath</key><string>CHANGEME/.vector-memory-mcp/hub-daemon.log</string>
+</dict>
+</plist>

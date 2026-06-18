@@ -7,8 +7,8 @@
 | 階段 | 狀態 | commit |
 |---|---|---|
 | 1. 統一 Schema + Migration | ✅ PASS | 66e9c74 |
-| 2. 多源 Connector | ✅ PASS | (待 commit) |
-| 3. Daemon + CLI | ⏳ 待做 | - |
+| 2. 多源 Connector | ✅ PASS | 54ee26f |
+| 3. Daemon + CLI | ✅ PASS | (待 commit) |
 | 4. 生命週期自動化 | ⏳ 待做 | - |
 | 5. 匯出/轉化 | ⏳ 待做 | - |
 | 6. 雲端備份 | ⏳ 待做 | - |
@@ -64,5 +64,31 @@
 ### FAIL 區
 - collect.py 第一次正式跑被工具中斷 (非代碼問題),hub-state.json 未生成 → 不影響資料正確性,daemon 跑一次即修復
 
+## 階段 3 詳細結果 ✅
+
+### 完成項
+- `hub/hub_daemon.py`: 常駐 daemon (signal-aware, 每 N 分鐘跑 collect + lifecycle hook)
+- `hub/hub_cli.py`: CLI (start/stop/status/run-once/list-connectors/logs/config/install-launchd)
+- `hub/launchd/com.vector-memory.hub.plist`: macOS plist 範本 (CHANGEME 標記)
+- `hub/systemd/vector-memory-hub.service`: Linux user unit 範本
+- 預設 config: `~/.vector-memory-mcp/hub-config.yml` (interval/connectors/privacy)
+
+### 驗收證據
+- py_compile: hub_daemon.py + hub_cli.py 通過 ✅
+- `hub_cli.py config`: 自動建立預設 yml ✅
+- `hub_cli.py list-connectors`: 5 connector 全可用 ✅
+- `hub_cli.py start`: launchd load 成功,PID 25573, LastExitStatus 0 ✅
+- `launchctl list com.vector-memory.hub`: 確認 daemon 在跑 + plist 路徑正確 ✅
+- daemon log: cycle #1 採集啟動正常 ✅
+- `hub_cli.py stop`: launchctl unload 成功 ✅
+
+### 決策記錄
+- daemon 用 subprocess 呼叫 collect.py (而非 in-process import),隔離崩潰 + 重用 venv
+- launchd plist 動態生成 (替換實際路徑),repo 帶 CHANGEME 範本
+- daemon 驗收完即 stop,避免占資源影響後續階段測試
+
+### FAIL 區
+(無)
+
 ## 下一步
-階段 3: Daemon + CLI
+階段 4: 生命週期自動化
