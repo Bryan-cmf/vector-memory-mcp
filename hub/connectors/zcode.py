@@ -28,12 +28,40 @@ MAX_LOG_SIZE = 200_000
 
 
 class ZCodeConnector:
-    """採集 ZCode 對話 log + 非敏感狀態。"""
+    """採集 ZCode 對話 log + 非敏感狀態。
+
+    雙寫: 除 unified_mem 外,也寫進 zcode_mem (跟 claude_mem 等 *_mem 同 schema),
+    讓 mem_search(collection="zcode_mem") 能直接用。
+    """
 
     name = "zcode"
+    target_collection = "zcode_mem"   # 專屬 collection (跟 *_mem 對齊)
 
     def __init__(self, state: dict | None = None):
         self.state = state or {}
+
+    @staticmethod
+    def payload_for_target(rec) -> dict:
+        """把 UnifiedRecord 轉成 *_mem 相容 payload (跟 claude_mem 同 schema)。
+
+        *_mem schema: content, platform, role, channel, memory_type,
+                      importance, session_id, timestamp, char_length, created_at
+        """
+        md = rec.metadata or {}
+        return {
+            "content": rec.content,
+            "platform": "zcode",
+            "role": md.get("role", "system"),
+            "channel": "zcode-local",
+            "memory_type": rec.source_type if rec.source_type in
+                           ("conversation", "fact", "decision", "task", "note")
+                           else "note",
+            "importance": int(round(rec.importance * 10)) if rec.importance <= 1 else int(rec.importance),
+            "session_id": md.get("session_id", ""),
+            "timestamp": rec.created_at,
+            "char_length": md.get("char_length", len(rec.content)),
+            "created_at": rec.created_at,
+        }
 
     def is_available(self) -> bool:
         return ZCODE_V2.exists() or ZCODE_LOGS.exists()

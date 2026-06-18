@@ -63,8 +63,41 @@ def save_state(state: dict) -> None:
     tmp.replace(STATE_FILE)
 
 
-def qdrant_upsert(records: list[UnifiedRecord], embedder) -> int:
+def ensure_collection(name: str, dim: int = 1024) -> bool:
+    """確保 collection 存在,不存在則建立 (1024d Cosine,跟 BGE-m3 對齊)。"""
+    import urllib.request
+    try:
+        req = urllib.request.Request(f"{QDRANT_URL}/collections/{name}",
+                                     method="GET")
+        with urllib.request.urlopen(req, timeout=10) as r:
+            json.loads(r.read().decode())
+        return True   # 已存在
+    except Exception:
+        pass
+    # 建立
+    try:
+        body = json.dumps({"vectors": {"size": dim, "distance": "Cosine"}}).encode()
+        req = urllib.request.Request(f"{QDRANT_URL}/collections/{name}?timeout=60",
+                                     data=body, method="PUT",
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            r.read()
+        print(f"   📦 建立 collection: {name} ({dim}d)", flush=True)
+        return True
+    except Exception as e:
+        print(f"   ⚠️ 建立 {name} 失敗: {e}", file=sys.stderr)
+        return False
+
+
+def qdrant_upsert(records: list[UnifiedRecord], embedder,
+                  collection: str = UNIFIED,
+                  payload_override=None) -> int:
     """embed + upsert 一批,回傳成功數。
+
+    Args:
+      collection: 寫進哪個 collection (預設 unified_mem)
+      payload_override: 可選函式 (UnifiedRecord) -> dict,
+                        用來覆寫 payload (例如寫 *_mem 相容格式時)
 
     保護:
     - content 超過 MAX_CONTENT_CHARS (8000) 會截斷 (BGE-m3 上限 ~8192 tokens,MPS 對超大張量會崩)
@@ -97,12 +130,21 @@ def qdrant_upsert(records: list[UnifiedRecord], embedder) -> int:
     for rec, vec in zip(records, vectors):
         if vec is None:
             continue    # embed 失敗的跳過
-        points.append({"id": rec.record_uuid, "vector": vec, "payload": rec.to_payload()})
+        payload = payload_override(rec) if payload_override else rec.to_payload()
+        # *_mem 相容 collection 用不同 UUID namespace (避免跟 unified_mem 衝突到同 ID)
+        if collection != UNIFIED:
+            import uuid as _uuid
+            import hashlib as _hashlib
+            ns_key = f"{collection}:{rec.record_uuid}"
+            point_id = str(_uuid.uuid5(_uuid.NAMESPACE_URL, ns_key))
+        else:
+            point_id = rec.record_uuid
+        points.append({"id": point_id, "vector": vec, "payload": payload})
 
     if not points:
         return 0
     body = json.dumps({"points": points}).encode()
-    req = urllib.request.Request(f"{QDRANT_URL}/collections/{UNIFIED}/points?wait=true",
+    req = urllib.request.Request(f"{QDRANT_URL}/collections/{collection}/points?wait=true",
                                  data=body, method="PUT",
                                  headers={"Content-Type": "application/json"})
     try:
@@ -110,7 +152,7 @@ def qdrant_upsert(records: list[UnifiedRecord], embedder) -> int:
             r.read()
         return len(points)
     except Exception as e:
-        print(f"  ⚠️ upsert 失敗: {e}", file=sys.stderr)
+        print(f"  ⚠️ upsert 到 {collection} 失敗: {e}", file=sys.stderr)
         return 0
 
 
@@ -184,16 +226,26 @@ def main():
     embedder = get_embedder()
     print(f"   ✓ {embedder.model_name} ({embedder.get_dimension()}d)")
 
+    # 確保所有 target_collection 存在 (如 zcode_mem)
+    target_cols = {getattr(c, "target_collection") for c in available
+                   if getattr(c, "target_collection", None)}
+    for tc in target_cols:
+        ensure_collection(tc, embedder.get_dimension())
+
     grand_total = 0
     grand_new = 0
     agent_stats: dict[str, int] = {}
 
     for c in available:
         print(f"\n🔧 採集: {c.name}")
+        # 是否要雙寫進專屬 collection (如 zcode_mem)
+        target_col = getattr(c, "target_collection", None)
+        target_override = getattr(c, "payload_for_target", None)   # *_mem schema 轉換函式
         batch: list[UnifiedRecord] = []
         conn_new = 0
         conn_total = 0
         errors = 0
+        target_new = 0
         try:
             for rec in c.collect():
                 conn_total += 1
@@ -203,15 +255,27 @@ def main():
                     conn_new += 1
                     agent_stats[rec.source_agent] = agent_stats.get(rec.source_agent, 0) + 1
                     if len(batch) >= BATCH_SIZE:
-                        n = qdrant_upsert(batch, embedder)
+                        # 1. 寫進 unified_mem (統一庫)
+                        n = qdrant_upsert(batch, embedder, collection=UNIFIED)
                         grand_new += n
+                        # 2. 若有 target_collection,雙寫進專屬 collection (*_mem schema)
+                        if target_col and target_override:
+                            tn = qdrant_upsert(batch, embedder,
+                                               collection=target_col,
+                                               payload_override=target_override)
+                            target_new += tn
                         batch.clear()
                 except Exception:
                     errors += 1
                     continue
             if batch:
-                n = qdrant_upsert(batch, embedder)
+                n = qdrant_upsert(batch, embedder, collection=UNIFIED)
                 grand_new += n
+                if target_col and target_override:
+                    tn = qdrant_upsert(batch, embedder,
+                                       collection=target_col,
+                                       payload_override=target_override)
+                    target_new += tn
                 batch.clear()
         except Exception as e:
             print(f"  ⚠️ {c.name} 採集中斷: {e}")
@@ -219,7 +283,8 @@ def main():
 
         c.set_collected(now_iso())
         grand_total += conn_total
-        print(f"   {c.name}: 採集 {conn_total}, 寫入 {conn_new}, 錯誤 {errors}")
+        target_msg = f", 專屬 {target_col} +{target_new}" if target_col and target_new else ""
+        print(f"   {c.name}: 採集 {conn_total}, 寫入 unified {conn_new}{target_msg}, 錯誤 {errors}")
 
     save_state(state)
 
