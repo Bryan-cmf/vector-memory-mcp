@@ -1,0 +1,18 @@
+{
+  "_comment": "ZCode: 合併到 ~/.zcode/cli/config.json 的 mcp.servers 區塊。install.sh 會自動處理;這是手動 fallback 範本。",
+  "_path_default": "~/.zcode/cli/config.json",
+  "mcp": {
+    "servers": {
+      "vector-memory": {
+        "command": "/Users/CHANGEME/.vector-memory-mcp/.venv/bin/python",
+        "args": ["/Users/CHANGEME/.vector-memory-mcp/mcp_server.py"],
+        "cwd": "/Users/CHANGEME/.vector-memory-mcp",
+        "env": {
+          "QDRANT_URL": "http://localhost:6333",
+          "DEFAULT_COLLECTION": "vector_memory",
+          "EMBEDDING_MODEL": "BAAI/bge-m3"
+        }
+      }
+    }
+  }
+}

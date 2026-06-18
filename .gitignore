@@ -1,0 +1,15 @@
+# 環境變數 (含 API key)
+.env
+
+# 安裝產物 (installer 跑完會生成在這個 repo 內,如果是 dev 模式)
+.venv/
+qdrant_storage/
+*.log
+
+# Client 註冊產物 (installer 在 clients/ 生成)
+# 但保留 .example 版
+clients/*.snippet.json
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,20 @@
+{
+  "_comment": "OpenCode 原版 (非 ZCode fork): mcp.<name> 平鋪格式。合併到 config.json。",
+  "_path_default": "~/.config/opencode/config.json",
+  "mcp": {
+    "vector-memory": {
+      "type": "local",
+      "command": [
+        "/Users/CHANGEME/.vector-memory-mcp/.venv/bin/python",
+        "/Users/CHANGEME/.vector-memory-mcp/mcp_server.py"
+      ],
+      "cwd": "/Users/CHANGEME/.vector-memory-mcp",
+      "environment": {
+        "QDRANT_URL": "http://localhost:6333",
+        "DEFAULT_COLLECTION": "vector_memory",
+        "EMBEDDING_MODEL": "BAAI/bge-m3"
+      },
+      "enabled": true
+    }
+  }
+}

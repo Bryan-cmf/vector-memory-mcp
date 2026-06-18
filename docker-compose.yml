@@ -1,0 +1,29 @@
+# =============================================================================
+# Qdrant for vector-memory-mcp (本地模式)
+# =============================================================================
+# 用途: install.sh --qdrant local 會用這份;也可單獨 docker compose up -d
+#
+# 資料持久化: ./qdrant_storage bind mount (容器重建後資料不丟)
+# 埠:        6333 (REST), 6334 (gRPC)
+# =============================================================================
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: vector-memory-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      # 🔴 bind mount 而非 named volume,確保容器重建後資料還在
+      - ./qdrant_storage:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__LOG_LEVEL=INFO
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/6333' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
