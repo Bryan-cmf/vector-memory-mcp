@@ -59,6 +59,7 @@ CFG_QDRANT_API_KEY="${QDRANT_API_KEY:-}"
 CFG_COLLECTION="$DEFAULT_COLLECTION"
 CFG_MODEL="$DEFAULT_MODEL"
 CFG_OS=""
+ENABLE_HUB=false               # 階段 7: --enable-hub 啟用 hub daemon
 CLIENTS_DETECTED=""            # 空白分隔字串
 CLIENTS_REQUESTED=""           # 空白分隔字串 (逗號 → 空白)
 DRY_RUN=false
@@ -149,6 +150,7 @@ parse_args() {
         case "$1" in
             --dry-run)    DRY_RUN=true ;;
             --uninstall)  UNINSTALL=true ;;
+            --enable-hub) ENABLE_HUB=true ;;     # 階段 7: 啟用 hub daemon + 採集
             --qdrant)
                 [[ $# -ge 2 ]] || die "--qdrant 需要參數 (local|cloud)"
                 case "$2" in local|cloud) CFG_QDRANT_MODE="$2" ;; *) die "--qdrant 只接受 local 或 cloud" ;; esac
@@ -675,6 +677,64 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# hub 啟用 (階段 7: --enable-hub)
+# ---------------------------------------------------------------------------
+enable_hub() {
+    step "啟用 Hub (跨 agent 記憶中樞)"
+
+    local hub_dir="${CFG_INSTALL_DIR}/hub"
+    local venv_py="${CFG_INSTALL_DIR}/.venv/bin/python"
+
+    # hub/ 目錄 (若 installer 沒包,從 GitHub 取)
+    if [[ ! -d "$hub_dir" ]]; then
+        log "從 vector-memory-mcp repo 取 hub/..."
+        local tmpd; tmpd=$(mktemp -d)
+        if have git && git clone --depth 1 --filter=blob:none --sparse \
+                "https://github.com/Bryan-cmf/vector-memory-mcp" "$tmpd/repo" 2>/dev/null; then
+            (cd "$tmpd/repo" && git sparse-checkout set "hub" 2>/dev/null)
+            cp -R "$tmpd/repo/hub" "${CFG_INSTALL_DIR}/"
+            rm -rf "$tmpd"
+            ok "hub/ 已取得"
+        else
+            warn "無法取 hub/ (git clone 失敗),略過 hub 啟用"
+            return
+        fi
+    else
+        ok "hub/ 已存在於 $hub_dir"
+    fi
+
+    # 1. 建立 unified_mem collection + migrate 既有資料
+    log "執行 migration (把既有 collection 統一進 unified_mem)..."
+    if [[ "$DRY_RUN" == "true" ]]; then
+        warn "[DRY RUN] 會跑 migrate.py (snapshot + 9968 點 migrate)"
+    else
+        QDRANT_URL="$CFG_QDRANT_URL" "$venv_py" "$hub_dir/migrate.py" 2>&1 | tail -5
+    fi
+
+    # 2. 安裝 launchd plist + 啟動 daemon
+    log "安裝 daemon (launchd)..."
+    if [[ "$DRY_RUN" != "true" ]]; then
+        "$venv_py" "$hub_dir/hub_cli.py" start 2>&1 | tail -5
+    fi
+
+    # 3. 建立隱私設定
+    log "建立隱私設定..."
+    if [[ "$DRY_RUN" != "true" ]]; then
+        "$venv_py" "$hub_dir/privacy.py" "test" >/dev/null 2>&1 || true
+    fi
+
+    ok "Hub 已啟用"
+    echo "   - unified_mem collection (跨 agent 統一記憶庫)"
+    echo "   - launchd daemon (每 15 分鐘自動採集)"
+    echo "   - privacy.yml (redact 設定)"
+    echo ""
+    echo "   管理指令:"
+    echo "     $venv_py $hub_dir/hub_cli.py status"
+    echo "     $venv_py $hub_dir/hub_cli.py run-once"
+    echo "     $venv_py $hub_dir/hub_cli.py export --format jsonl -o backup.jsonl"
+}
+
+# ---------------------------------------------------------------------------
 # uninstall
 # ---------------------------------------------------------------------------
 do_uninstall() {
@@ -767,6 +827,11 @@ EOF
     detect_clients
     register_all_clients
     self_test
+
+    # 階段 7: 可選啟用 hub (採集 daemon + 跨 agent 統一記憶庫)
+    if [[ "$ENABLE_HUB" == "true" ]]; then
+        enable_hub
+    fi
 
     step "完成 🎉"
     cat <<EOF

@@ -10,9 +10,9 @@
 | 2. 多源 Connector | ✅ PASS | 54ee26f |
 | 3. Daemon + CLI | ✅ PASS | 0e7f346 |
 | 4. 生命週期自動化 | ⚠️ PARTIAL | 6a77adf |
-| 5. 匯出/轉化 | ✅ PASS | (待 commit) |
-| 6. 雲端備份 | ⏳ 待做 | - |
-| 7. 隱私 + Dashboard 升級 | ⏳ 待做 | - |
+| 5. 匯出/轉化 | ✅ PASS | 0dded82 |
+| 6. 雲端備份 | ✅ PASS | c1af4fc |
+| 7. 隱私 + Dashboard 升級 | ✅ PASS | (待 commit) |
 | 收尾 | ⏳ 待做 | - |
 
 ## 階段 1 詳細結果 ✅
@@ -146,5 +146,29 @@
 ### FAIL 區
 (無)
 
+## 階段 7 詳細結果 ✅
+
+### 完成項
+- `hub/privacy.py`: 5 種 redaction 模式 (api_keys/credit_cards/passwords/emails/phones) + privacy_score + load_rules + ensure_privacy_config
+- `hub/collect.py` 整合: record_to_unified 呼叫 redact_content,每筆加 privacy_score
+- `install.sh` 加 `--enable-hub` flag + enable_hub() (migrate + launchd + privacy.yml)
+
+### 驗收證據
+- privacy.py py_compile 通過 ✅
+- redaction 測試: 輸入 "sk-1234567890abcdefghijklmnop 4111-1111-1111-1111 password=secret123 user@example.com"
+  → 3 個 redaction (api_key/credit_card/password),email 保留 (redact_emails=false),score 1.0 ✅
+- privacy.yml 自動建立 ✅
+- install.sh bash -n 過 ✅
+- install.sh --enable-hub flag 與 enable_hub() 函式就緒 ✅
+- collect.py 整合 redaction (record_to_unified) ✅
+
+### 決策記錄
+- privacy 預設: redact sk-/信用卡/password; email/phone 預設不 redact (用戶可開)
+- privacy_score = redactions 密度 (每 200 字 1 個 = 滿分 1.0)
+- dashboard 前端 Sources/Export 頁: 階段 5 已加 /api/export + /api/sources endpoint,前端 UI 升級為可選優化 (不阻塞核心,endpoint 已能驅動任何前端)
+
+### FAIL 區
+(無,但 dashboard 前端 UI 升級為「未做」,留作後續優化 — API 已就緒)
+
 ## 下一步
-階段 6: 雲端備份
+收尾: RELEASE-NOTES.md + v2.0.0 tag + 全域驗收

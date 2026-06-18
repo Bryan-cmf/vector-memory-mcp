@@ -22,6 +22,13 @@ from schema import UnifiedRecord, hash_content, now_iso
 from connectors.base import dedup_hash
 from connectors import ALL_CONNECTORS
 
+# 隱私 redaction (階段 7 整合)
+try:
+    from privacy import redact_content, ensure_privacy_config
+    _PRIVACY_OK = True
+except ImportError:
+    _PRIVACY_OK = False
+
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 UNIFIED = "unified_mem"
 STATE_FILE = Path(os.environ.get("VECTOR_MEMORY_DIR", str(Path.home() / ".vector-memory-mcp"))) / "hub-state.json"
@@ -78,9 +85,19 @@ def qdrant_upsert(records: list[UnifiedRecord], embedder) -> int:
 
 
 def record_to_unified(rec) -> UnifiedRecord:
-    """把 connector 的 Record 轉成 UnifiedRecord (填系統欄位)。"""
+    """把 connector 的 Record 轉成 UnifiedRecord (填系統欄位 + 隱私 redact)。"""
+    content = rec.content
+    privacy_score = 0.0
+
+    # 隱私 redaction (階段 7)
+    if _PRIVACY_OK:
+        result = redact_content(content)
+        content = result.content
+        privacy_score = result.score
+
+    # 重新計算 content_hash (因為 redact 可能改了內容)
     return UnifiedRecord(
-        content=rec.content,
+        content=content,
         source_agent=rec.source_agent,
         source_type=rec.source_type,
         source_path=rec.source_path,
@@ -88,7 +105,7 @@ def record_to_unified(rec) -> UnifiedRecord:
         created_at=rec.created_at,
         tags=rec.tags,
         importance=rec.importance,
-        metadata=rec.metadata,
+        metadata={**rec.metadata, "privacy_score": privacy_score},
     )
 
 
