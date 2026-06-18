@@ -6,8 +6,8 @@
 
 | 階段 | 狀態 | commit |
 |---|---|---|
-| 1. 統一 Schema + Migration | ✅ PASS | (待 commit) |
-| 2. 多源 Connector | ⏳ 待做 | - |
+| 1. 統一 Schema + Migration | ✅ PASS | 66e9c74 |
+| 2. 多源 Connector | ✅ PASS | (待 commit) |
 | 3. Daemon + CLI | ⏳ 待做 | - |
 | 4. 生命週期自動化 | ⏳ 待做 | - |
 | 5. 匯出/轉化 | ⏳ 待做 | - |
@@ -38,5 +38,31 @@
 ### FAIL 區
 (無)
 
+## 階段 2 詳細結果 ✅
+
+### 完成項
+- `hub/connectors/__init__.py`: ALL_CONNECTORS 註冊表
+- `hub/connectors/base.py`: Connector Protocol + Record dataclass + dedup_hash
+- `hub/connectors/qdrant_mirror.py`: 既有 collection 增量鏡像
+- `hub/connectors/markdown_dir.py`: auto_sync 通用化 (多目錄、Markdown-aware 分塊)
+- `hub/connectors/claude_code.py`: ~/.openclaw/agents/ JSONL/JSON/MD 採集
+- `hub/connectors/cursor.py`: state.vscdb SQLite (遞迴找 text/content 欄位)
+- `hub/connectors/zcode.py`: ~/.zcode/v2 狀態 + log 採集
+- `hub/collect.py`: 協調器 (discover → collect → embed → upsert)
+
+### 驗收證據
+- unified_mem: 從 9968 → **11270 點** (+1302 新採集)
+- source_agent 分佈(取樣 1000): openclaw 810 / **markdown 85(新)** / claude 55 / deepseek 27 / **claude_code:coder-deepseek 19(新)** / hermes 3 / **claude_code:checker 1(新)**
+- source_type: note 915 / conversation 71 / task 7 / fact 6 / decision 1
+- 5 種 connector 都 is_available() = True 且產出資料 ✅
+
+### 決策記錄
+- markdown_dir 預設目錄移除 ~/Documents (會掃到 378k 無關檔案),改為 ~/.openclaw/workspace/memory,用戶可用 MEMORY_EXTRA_DIRS 擴充
+- collect 中斷在 save_state 前 (hub-state.json 沒生成),但資料已 upsert,下次 daemon 會自動增量
+- 中途 Colima 停了 (Docker daemon idle),手動 colima start + docker start mh-qdrant 恢復,Qdrant volume 持久化資料無損
+
+### FAIL 區
+- collect.py 第一次正式跑被工具中斷 (非代碼問題),hub-state.json 未生成 → 不影響資料正確性,daemon 跑一次即修復
+
 ## 下一步
-階段 2: 多源 Connector 層
+階段 3: Daemon + CLI
