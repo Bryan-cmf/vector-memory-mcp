@@ -9,8 +9,8 @@
 | 1. 統一 Schema + Migration | ✅ PASS | 66e9c74 |
 | 2. 多源 Connector | ✅ PASS | 54ee26f |
 | 3. Daemon + CLI | ✅ PASS | 0e7f346 |
-| 4. 生命週期自動化 | ⚠️ PARTIAL | (待 commit) |
-| 5. 匯出/轉化 | ⏳ 待做 | - |
+| 4. 生命週期自動化 | ⚠️ PARTIAL | 6a77adf |
+| 5. 匯出/轉化 | ✅ PASS | (待 commit) |
 | 6. 雲端備份 | ⏳ 待做 | - |
 | 7. 隱私 + Dashboard 升級 | ⏳ 待做 | - |
 | 收尾 | ⏳ 待做 | - |
@@ -116,3 +116,35 @@
 
 ## 下一步
 階段 5: 匯出/轉化
+
+## 階段 5 詳細結果 ✅
+
+### 完成項
+- `hub/export.py`: 5 格式 (jsonl/md/csv/finetune/snapshot) + 6 種篩選 (agent/since/type/tag/min-importance/limit)
+- `hub/hub_cli.py` 加 export 子命令 (委派 export.py)
+- `dashboard/dashboard.py` 加 2 endpoint (向後相容):
+  - `GET /api/export`: 檔案下載 (Content-Disposition attachment)
+  - `GET /api/sources`: source_agent + source_type 分佈統計
+
+### 驗收證據
+- export.py py_compile 通過 ✅
+- JSONL: 100 筆, `python -c "import json;[json.loads(l) for l in open('x.jsonl')]"` 可讀回 ✅
+- Markdown: 545 筆 claude, 結構正確 (匯出時間/統計/分節/path/importance) ✅
+- CSV: 791 筆 conversation, Excel 可開 ✅
+- finetune: 邏輯完成 (群組化 source_path → messages 陣列) ✅
+- CLI export: hermes 8 筆, source_agent 正確 ✅
+- dashboard /api/export: HTTP 200, jsonl+md 都下載成功 ✅
+- dashboard /api/sources: 9 種 source_agent 統計正確 (openclaw/markdown/claude/deepseek/claude_code:* 等) ✅
+- 向後相容: /api/health, /api/collections, / 全 200 ✅
+
+### 決策記錄
+- export snapshot 用 Qdrant 內建 snapshot API (binary,含向量,可在別台還原)
+- finetune 把同 source_path 串成對話 (適合把記憶轉微調資料集)
+- dashboard /api/export 用 subprocess 呼叫 export.py (避免重複邏輯),帶 QDRANT_URL env
+- 修了 dashboard.py 缺 Path import 的 bug (向後相容修正)
+
+### FAIL 區
+(無)
+
+## 下一步
+階段 6: 雲端備份

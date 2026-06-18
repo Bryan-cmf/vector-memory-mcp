@@ -194,6 +194,29 @@ def cmd_run_once():
     sys.exit(r.returncode)
 
 
+def cmd_export(args):
+    """匯出記憶 (委派 export.py)。"""
+    cmd = [VENV_PYTHON, str(HUB_DIR / "export.py")]
+    if args.format:
+        cmd += ["--format", args.format]
+    if args.output:
+        cmd += ["-o", args.output]
+    if args.agent:
+        cmd += ["--agent", args.agent]
+    if args.since:
+        cmd += ["--since", args.since]
+    if args.type:
+        cmd += ["--type", args.type]
+    if args.tag:
+        cmd += ["--tag", args.tag]
+    if args.min_importance is not None:
+        cmd += ["--min-importance", str(args.min_importance)]
+    if args.limit:
+        cmd += ["--limit", str(args.limit)]
+    r = subprocess.run(cmd, cwd=str(HUB_DIR))
+    sys.exit(r.returncode)
+
+
 def cmd_list_connectors():
     """列偵測到的 connector。"""
     print(c("b", "偵測 connector..."))
@@ -263,6 +286,17 @@ def main():
     sub.add_parser("list-connectors", help="列偵測到的 connector")
     sub.add_parser("logs", help="看 daemon log")
     sub.add_parser("config", help="顯示/建立 config")
+    # export 子命令 (帶自己的參數)
+    pe = sub.add_parser("export", help="匯出記憶")
+    pe.add_argument("--format", required=True,
+                    choices=["jsonl", "md", "csv", "finetune", "snapshot"])
+    pe.add_argument("-o", "--output", required=True, help="輸出檔")
+    pe.add_argument("--agent", default="", help="只匯某 source_agent")
+    pe.add_argument("--since", default="", help="只匯某日期後 (YYYY-MM-DD)")
+    pe.add_argument("--type", default="", help="只匯某 source_type")
+    pe.add_argument("--tag", default="", help="只匯含某 tag")
+    pe.add_argument("--min-importance", type=float, default=None)
+    pe.add_argument("--limit", type=int, default=50000)
     # 為了 install.sh 用
     sub.add_parser("install-launchd", help="安裝 launchd plist (不啟動)")
     args = p.parse_args()
@@ -281,6 +315,8 @@ def main():
         cmd_logs()
     elif args.cmd == "config":
         cmd_config()
+    elif args.cmd == "export":
+        cmd_export(args)
     elif args.cmd == "install-launchd":
         VM_DIR.mkdir(parents=True, exist_ok=True)
         LAUNCHD_PLIST.parent.mkdir(parents=True, exist_ok=True)

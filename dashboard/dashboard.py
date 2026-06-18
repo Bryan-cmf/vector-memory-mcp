@@ -26,6 +26,7 @@ import sys
 import threading
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import urllib.request
 import urllib.error
@@ -223,6 +224,76 @@ def create_app(qdrant: Qdrant, embedder: Embedder):
                 "created_at": pl.get("created_at", ""),
             })
         return {"query": q, "collection": collection, "hits": out}
+
+    # ---- 匯出 API (階段 5 新增,向後相容) ----
+    @app.get("/api/export")
+    def api_export(format: str = Query("jsonl"),
+                   agent: str = Query(""),
+                   since: str = Query(""),
+                   type: str = Query(""),
+                   tag: str = Query(""),
+                   min_importance: float = Query(0.0, ge=0.0, le=1.0),
+                   limit: int = Query(1000, ge=1, le=50000)):
+        """匯出記憶。format=jsonl|md|csv。回應檔案下載。"""
+        from fastapi.responses import PlainTextResponse, Response
+        from urllib.parse import quote
+
+        # 委派給 export.py 邏輯 (避免重複)
+        import subprocess as _sp
+        import tempfile as _tf
+        ext = {"jsonl": "jsonl", "md": "md", "csv": "csv"}.get(format, "jsonl")
+        with _tf.NamedTemporaryFile(suffix=f".{ext}", delete=False) as _tf_:
+            tmp_path = _tf_.name
+        try:
+            venv_py = str(Path(__file__).parent.parent / "hub" / ".venv" / "bin" / "python")
+            if not Path(venv_py).exists():
+                venv_py = sys.executable   # fallback 用當前 python
+            cmd = [venv_py, str(Path(__file__).parent.parent / "hub" / "export.py"),
+                   "--format", format, "-o", tmp_path, "--limit", str(limit)]
+            if agent: cmd += ["--agent", agent]
+            if since: cmd += ["--since", since]
+            if type: cmd += ["--type", type]
+            if tag: cmd += ["--tag", tag]
+            if min_importance > 0: cmd += ["--min-importance", str(min_importance)]
+            env = {**os.environ, "QDRANT_URL": qdrant.url}
+            _sp.run(cmd, capture_output=True, timeout=120, check=False, env=env)
+            content = Path(tmp_path).read_bytes()
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+        media = {"jsonl": "application/jsonl", "md": "text/markdown", "csv": "text/csv"}.get(format, "text/plain")
+        fname = f"vector-memory-export-{agent or 'all'}.{ext}"
+        return Response(content, media_type=media,
+                        headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+    @app.get("/api/sources")
+    def api_sources():
+        """各 source_agent 的統計 (dashboard 首頁分佈圖用)。"""
+        # 直接 scroll unified_mem (跨 agent 統一庫)
+        import urllib.request
+        try:
+            req = urllib.request.Request(
+                f"{qdrant.url}/collections/unified_mem/points/scroll",
+                data=json.dumps({"limit": 5000, "with_payload": True, "with_vector": False}).encode(),
+                method="POST",
+                headers={"Content-Type": "application/json"},
+            )
+            if qdrant.api_key:
+                req.add_header("api-key", qdrant.api_key)
+            with urllib.request.urlopen(req, timeout=15) as r:
+                d = json.loads(r.read().decode())
+        except Exception:
+            return {"error": "unified_mem 連不上"}
+
+        pts = d.get("result", {}).get("points", [])
+        from collections import Counter
+        agents = Counter(p.get("payload", {}).get("source_agent", "?") for p in pts)
+        types = Counter(p.get("payload", {}).get("source_type", "?") for p in pts)
+        return {
+            "sampled": len(pts),
+            "by_agent": dict(agents.most_common()),
+            "by_type": dict(types.most_common()),
+        }
 
     # ---- 前端 (內嵌,零建置) ----
     @app.get("/", response_class=HTMLResponse)
