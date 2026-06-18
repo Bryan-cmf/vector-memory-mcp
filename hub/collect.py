@@ -64,13 +64,43 @@ def save_state(state: dict) -> None:
 
 
 def qdrant_upsert(records: list[UnifiedRecord], embedder) -> int:
-    """embed + upsert 一批,回傳成功數。"""
+    """embed + upsert 一批,回傳成功數。
+
+    保護:
+    - content 超過 MAX_CONTENT_CHARS (8000) 會截斷 (BGE-m3 上限 ~8192 tokens,MPS 對超大張量會崩)
+    - embed 失敗的單筆會被跳過,不拖垮整批
+    """
     import urllib.request
-    texts = [r.content for r in records]
-    vectors = embedder.encode(texts)
+    MAX_CONTENT_CHARS = 8000   # BGE-m3 安全上限
+
+    # 截斷超長 content (避免 MPS INT_MAX 錯誤)
+    texts = []
+    for r in records:
+        t = r.content[:MAX_CONTENT_CHARS] if len(r.content) > MAX_CONTENT_CHARS else r.content
+        texts.append(t)
+
+    # embed (可能對超大/特殊內容失敗,逐筆容錯)
+    try:
+        vectors = embedder.encode(texts)
+    except Exception as e:
+        # 整批失敗,退化為逐筆 embed (犧牲速度換成功率)
+        print(f"  ⚠️ 整批 embed 失敗 ({str(e)[:80]}),退化逐筆", file=sys.stderr, flush=True)
+        vectors = []
+        for t in texts:
+            try:
+                v = embedder.encode([t])
+                vectors.append(v[0] if isinstance(v, list) else v)
+            except Exception:
+                vectors.append(None)   # 這筆放棄
+
     points = []
     for rec, vec in zip(records, vectors):
+        if vec is None:
+            continue    # embed 失敗的跳過
         points.append({"id": rec.record_uuid, "vector": vec, "payload": rec.to_payload()})
+
+    if not points:
+        return 0
     body = json.dumps({"points": points}).encode()
     req = urllib.request.Request(f"{QDRANT_URL}/collections/{UNIFIED}/points?wait=true",
                                  data=body, method="PUT",
