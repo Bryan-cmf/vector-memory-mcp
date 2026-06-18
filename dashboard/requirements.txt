@@ -1,0 +1,9 @@
+# vector-memory dashboard 依賴
+# 與 mcp_server.py 共用同一個 venv 即可 (install.sh 已裝好)
+# 若要獨立 venv 給 dashboard 用:
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+
+fastapi>=0.110
+uvicorn[standard]>=0.27
+# 語意搜尋用 (懶載入,不搜尋就不會 import)
+sentence-transformers>=3.0

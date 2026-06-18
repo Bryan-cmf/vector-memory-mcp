@@ -99,6 +99,67 @@ bash install.sh --qdrant local --client zcode
 | `mem_federated` | 跨 collection 聯邦搜尋 |
 | `mem_graph` | 記憶圖譜關聯 |
 
+## Web Dashboard(可選)
+
+`dashboard/dashboard.py` 是一個輕量 Web UI,直接打 Qdrant REST API,讓你用瀏覽器查看記憶庫健康度、最近記憶、做語意搜尋。**獨立於 MCP server**,不耦合、不影響 server 運作。
+
+### 啟動
+
+```bash
+# 複用 install.sh 建好的 venv (推薦,已含所有依賴)
+~/.vector-memory-mcp/.venv/bin/python ~/.vector-memory-mcp/dashboard/dashboard.py
+
+# 或獨立 venv
+cd dashboard
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python dashboard.py
+```
+
+打開 http://127.0.0.1:8765
+
+### 設計特點
+
+- **單檔**(`dashboard.py`,~500 行)—— FastAPI + 內嵌 HTML/CSS/JS,零 build 步驟
+- **直接打 Qdrant REST** —— 不 import `mcp_server.py`,不重複邏輯
+- **懶載入模型** —— 瀏覽統計即時輕量(~50MB RAM);語意搜尋時才載 BGE-m3(~2GB,首次 ~5s)
+- **本機 only** —— bind `127.0.0.1`,不對外曝露
+- **三個 API 端點**:
+  - `GET /api/collections` —— 所有 collection 健康度摘要
+  - `GET /api/collection/{name}/recent` —— 最近 N 筆記憶
+  - `GET /api/search?q=...&collection=...` —— 語意搜尋
+
+### 完整選項
+
+```bash
+python dashboard.py --port 9000                          # 自訂 port
+python dashboard.py --qdrant http://host:6333            # 自訂 Qdrant
+python dashboard.py --host 0.0.0.0                       # 對外 (⚠️ 無認證)
+QDRANT_API_KEY=xxx python dashboard.py                   # 帶認證的 Qdrant
+python dashboard.py --model BAAI/bge-small-zh-v1.5       # 換小模型加速搜尋
+```
+
+### 開機常駐(可選)
+
+用 `launchd` 讓 dashboard 開機自動啟動(macOS):
+
+```bash
+cat > ~/Library/LaunchAgents/com.vector-memory.dashboard.plist <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.vector-memory.dashboard</string>
+  <key>ProgramArguments</key><array>
+    <string>~/.vector-memory-mcp/.venv/bin/python</string>
+    <string>~/.vector-memory-mcp/dashboard/dashboard.py</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+</dict></plist>
+EOF
+launchctl load ~/Library/LaunchAgents/com.vector-memory.dashboard.plist
+```
+
 ## 解除安裝
 
 ```bash
